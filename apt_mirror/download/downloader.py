@@ -48,7 +48,6 @@ class HashMismatchException(Exception):
 @dataclass
 class DownloaderSettings:
     url: URL
-    target_root_path: Path
     aiofile_factory: BaseAsyncIOFileWriterFactory
     proxy: Proxy
     http2_disable: bool
@@ -106,12 +105,6 @@ class Downloader(ABC):
         self._unmodified: list[DownloadFileCompressionVariant] = []
         self._missing_sources: set[Path] = set()
 
-    def get_target_root_path(self):
-        return self._settings.target_root_path
-
-    def set_target_path(self, path: Path):
-        self._settings.target_root_path = path
-
     def add(self, *args: DownloadFile):
         self._sources.extend(a for a in args)
 
@@ -161,7 +154,7 @@ class Downloader(ABC):
     def unmodified_files_size(self) -> int:
         return self._unmodified_size
 
-    async def download(self):
+    async def download(self, target_root_path: Path):
         async def remove_finished_tasks(tasks: set[asyncio.Task[Any]]):
             done_tasks, _ = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
@@ -179,9 +172,7 @@ class Downloader(ABC):
             file_unmodified = False
             if source_file.check_size:
                 for variant in source_file.iter_variants():
-                    target_path = (
-                        self._settings.target_root_path / variant.get_source_path()
-                    )
+                    target_path = target_root_path / variant.get_source_path()
 
                     try:
                         stat = target_path.stat()
@@ -198,7 +189,9 @@ class Downloader(ABC):
             if file_unmodified:
                 continue
 
-            tasks.add(asyncio.create_task(self.download_file(source_file)))
+            tasks.add(
+                asyncio.create_task(self.download_file(source_file, target_root_path))
+            )
 
             if len(tasks) >= 128:
                 await remove_finished_tasks(tasks)
@@ -248,7 +241,7 @@ class Downloader(ABC):
             f" errors: {self._error_count} ({format_size(self._error_size)})"
         )
 
-    async def download_file(self, source_file: DownloadFile):
+    async def download_file(self, source_file: DownloadFile, target_root_path: Path):
         async def retry(
             message: str | None = None, sleep: bool = True, skip_try: bool = False
         ):
@@ -267,7 +260,7 @@ class Downloader(ABC):
             expected_size = variant.size
 
             for source_path in variant.get_all_paths():
-                target_path = self._settings.target_root_path / source_path
+                target_path = target_root_path / source_path
 
                 tries = 10
                 while tries > 0:
@@ -320,8 +313,7 @@ class Downloader(ABC):
                             continue
 
                         mirror_paths = [
-                            self._settings.target_root_path / path
-                            for path in variant.get_all_paths()
+                            target_root_path / path for path in variant.get_all_paths()
                         ]
 
                         if response.size and not self.need_update(

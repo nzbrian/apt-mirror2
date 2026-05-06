@@ -271,8 +271,6 @@ class RepositoryMirror:
         self._downloader = DownloaderFactory.for_settings(
             settings=DownloaderSettings(
                 url=self._repository.url,
-                target_root_path=config.skel_path
-                / repository.get_mirror_path(config.encode_tilde),
                 aiofile_factory=asyncio_file_factory,
                 proxy=self._config.proxy,
                 http2_disable=repository.http2_disable,
@@ -288,6 +286,9 @@ class RepositoryMirror:
         )
 
         metrics_collector.add_downloader(self._repository, self._downloader)
+
+    def _get_download_path(self, root_path: Path) -> Path:
+        return root_path / self._repository.get_mirror_path(self._config.encode_tilde)
 
     async def mirror(self) -> bool:
         """Start repository mirror process
@@ -383,7 +384,9 @@ class RepositoryMirror:
         while True:
             self._downloader.reset_paths()
             self._downloader.add(*release_files)
-            await self._downloader.download()
+            await self._downloader.download(
+                self._get_download_path(self._config.skel_path)
+            )
 
             # Drop release files in skel which we were unable to download
             downloaded_paths = self._downloader.get_downloaded_files_paths()
@@ -440,7 +443,7 @@ class RepositoryMirror:
             f" {self._downloader.queue_files_formatted_size}"
         )
 
-        await self._downloader.download()
+        await self._downloader.download(self._get_download_path(self._config.skel_path))
 
         if self._downloader.has_errors() or self._downloader.has_missing():
             self._error = True
@@ -448,11 +451,6 @@ class RepositoryMirror:
         return metadata_files
 
     async def download_pool_files(self) -> Iterable[DownloadFile]:
-        self._downloader.set_target_path(
-            self._config.mirror_path
-            / self._repository.get_mirror_path(self._config.encode_tilde)
-        )
-
         self._log.info(f"Processing metadata for repository {self._repository}")
         with ThreadPoolExecutor(max_workers=1) as executor:
             pool_files = await asyncio.get_running_loop().run_in_executor(
@@ -472,7 +470,9 @@ class RepositoryMirror:
             f" {self._downloader.queue_files_formatted_size}"
         )
 
-        await self._downloader.download()
+        await self._downloader.download(
+            self._get_download_path(self._config.mirror_path)
+        )
 
         if self._downloader.has_errors() or self._downloader.has_missing():
             self._error = True

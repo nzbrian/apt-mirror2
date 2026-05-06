@@ -111,10 +111,11 @@ class TestDownloader(IsolatedAsyncioTestCase):
     class _Downloader(Downloader):
         RETRY_TIMEOUT = 0
 
-        def __init__(self, *, settings: DownloaderSettings):
+        def __init__(self, *, settings: DownloaderSettings, target_root_path: Path):
             super().__init__(settings=settings)
             self.response_chunks: Sequence[bytes] = []
             self.response = DownloadResponse(_stream=self.response_stream, size=0)
+            self.target_root_path = target_root_path
 
         async def response_stream(self):
             for chunk in self.response_chunks:
@@ -134,17 +135,21 @@ class TestDownloader(IsolatedAsyncioTestCase):
             check_hashes = {t for t in HashType}
 
         with TemporaryDirectory() as tmpdir:
-            yield self._Downloader(
-                settings=DownloaderSettings(
-                    url=URL.from_string("http://localhost.local/repo"),
+            yield (
+                self._Downloader(
+                    settings=DownloaderSettings(
+                        url=URL.from_string("http://localhost.local/repo"),
+                        aiofile_factory=self._AIOFileWriterFactory(),
+                        proxy=Proxy(False, None, None, None, None),
+                        http2_disable=False,
+                        user_agent="apt-mirror2-test",
+                        semaphore=asyncio.Semaphore(1),
+                        slow_rate_protector_factory=SlowRateProtectorFactory(
+                            False, 0, 0
+                        ),
+                        check_hashes=check_hashes,
+                    ),
                     target_root_path=Path(tmpdir),
-                    aiofile_factory=self._AIOFileWriterFactory(),
-                    proxy=Proxy(False, None, None, None, None),
-                    http2_disable=False,
-                    user_agent="apt-mirror2-test",
-                    semaphore=asyncio.Semaphore(1),
-                    slow_rate_protector_factory=SlowRateProtectorFactory(False, 0, 0),
-                    check_hashes=check_hashes,
                 )
             )
 
@@ -170,14 +175,14 @@ class TestDownloader(IsolatedAsyncioTestCase):
 
             source_file = self.get_download_file(file_path, len(content), [])
 
-            await downloader.download_file(source_file)
+            await downloader.download_file(source_file, downloader.target_root_path)
 
             self.assertEqual(downloader.downloaded_files_count, 1)
             self.assertEqual(downloader.downloaded_files_size, len(content))
             self.assertFalse(downloader.has_errors())
             self.assertFalse(downloader.has_missing())
             self.assertEqual(
-                (downloader.get_target_root_path() / file_path).read_bytes(),
+                (downloader.target_root_path / file_path).read_bytes(),
                 content,
             )
 
@@ -196,19 +201,19 @@ class TestDownloader(IsolatedAsyncioTestCase):
                 (),
             )
 
-            await downloader.download_file(source_file)
+            await downloader.download_file(source_file, downloader.target_root_path)
 
             self.assertEqual(downloader.downloaded_files_count, 1)
             self.assertEqual(downloader.downloaded_files_size, len(content_bytes))
             self.assertFalse(downloader.has_errors())
             self.assertFalse(downloader.has_missing())
             self.assertEqual(
-                (downloader.get_target_root_path() / file_path).read_bytes(),
+                (downloader.target_root_path / file_path).read_bytes(),
                 content_bytes,
             )
 
             downloader.reset_stats()
-            (downloader.get_target_root_path() / file_path).unlink()
+            (downloader.target_root_path / file_path).unlink()
 
             broken_hashes = deepcopy(content_hashes)
             for h in broken_hashes:
@@ -222,13 +227,13 @@ class TestDownloader(IsolatedAsyncioTestCase):
                 broken_hashes,
             )
 
-            await downloader.download_file(source_file)
+            await downloader.download_file(source_file, downloader.target_root_path)
 
             self.assertEqual(downloader.downloaded_files_count, 0)
             self.assertEqual(downloader.downloaded_files_size, 0)
             self.assertTrue(downloader.has_errors())
             self.assertFalse(downloader.has_missing())
-            self.assertTrue((downloader.get_target_root_path() / file_path).exists())
+            self.assertTrue((downloader.target_root_path / file_path).exists())
 
         with self.get_downloader(check_hashes={HashType.SHA512}) as downloader:
             downloader.set_response(*content)
@@ -246,13 +251,13 @@ class TestDownloader(IsolatedAsyncioTestCase):
                 content_hashes,
             )
 
-            await downloader.download_file(source_file)
+            await downloader.download_file(source_file, downloader.target_root_path)
 
             self.assertEqual(downloader.downloaded_files_count, 1)
             self.assertEqual(downloader.downloaded_files_size, len(content_bytes))
             self.assertFalse(downloader.has_errors())
             self.assertFalse(downloader.has_missing())
             self.assertEqual(
-                (downloader.get_target_root_path() / file_path).read_bytes(),
+                (downloader.target_root_path / file_path).read_bytes(),
                 content_bytes,
             )
