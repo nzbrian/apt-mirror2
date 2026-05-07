@@ -35,7 +35,11 @@ from .prometheus import (
     DownloaderCollector,
     DummyDownloaderCollector,
 )
-from .repository import BaseRepository, InvalidReleaseFilesException
+from .repository import (
+    BaseRepository,
+    InvalidReleaseFilesException,
+    InvalidSignatureError,
+)
 from .uvloop import UVLOOP_AVAILABLE
 from .uvloop import run as uvloop_run
 from .version import __version__
@@ -410,7 +414,7 @@ class RepositoryMirror:
                     self._config.etc_trusted_parts,
                 )
                 break
-            except InvalidReleaseFilesException as ex:
+            except (InvalidReleaseFilesException, InvalidSignatureError) as ex:
                 self._log.warning(f"Release files are invalid: {ex}. Retrying...")
                 tries -= 1
 
