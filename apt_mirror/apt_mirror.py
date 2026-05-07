@@ -215,6 +215,7 @@ class RepositoryMirror:
     MOVE_FOLDER_PREFIX = ".apt_mirror_"
     MOVE_FOLDER_OLD_SUFFIX = f"{MOVE_FOLDER_PREFIX}old"
     MOVE_FOLDER_NEW_SUFFIX = f"{MOVE_FOLDER_PREFIX}new"
+    RELEASE_FILES_RETRY_TIMEOUT = 5
 
     @classmethod
     async def create(
@@ -416,7 +417,7 @@ class RepositoryMirror:
                 if tries < 1:
                     return []
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(self.RELEASE_FILES_RETRY_TIMEOUT)
 
         # Fail in case we have download errors, but don't complain for missing files
         if self._downloader.has_errors():

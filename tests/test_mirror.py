@@ -11,7 +11,7 @@ from apt_mirror.config import Config
 from apt_mirror.download import DownloadFile
 from apt_mirror.download.downloader import Downloader, DownloaderSettings
 from apt_mirror.download.response import DownloadResponse
-from apt_mirror.repository import BaseRepository
+from apt_mirror.repository import BaseRepository, InvalidSignatureError
 
 
 class TestRepositoryMirror(IsolatedAsyncioTestCase):
@@ -75,17 +75,20 @@ class TestRepositoryMirror(IsolatedAsyncioTestCase):
         }
 
     @staticmethod
-    def _get_config(root: Path) -> Config:
+    def _get_config(root: Path, extra: dict[str, str] | None = None) -> Config:
+        if not extra:
+            extra = {}
+
         with NamedTemporaryFile("wt", encoding="utf-8") as fp:
             fp.write(
                 "\n".join(
                     [
                         "set defaultarch amd64",
-                        "set release_files_retries 1",
                         "set check_hashes off",
                         f"deb {TestRepositoryMirror.REPOSITORY_URL} test main",
                         f"mirror_path {TestRepositoryMirror.REPOSITORY_URL} repo",
                     ]
+                    + [f"set {k} {v}" for k, v in extra.items()]
                 )
                 + "\n"
             )
@@ -113,7 +116,7 @@ class TestRepositoryMirror(IsolatedAsyncioTestCase):
         with TemporaryDirectory() as tempdir:
             root = Path(tempdir)
 
-            config = self._get_config(root)
+            config = self._get_config(root, {"release_files_retries": "1"})
             repository = config.repositories[self.REPOSITORY_URL]
 
             dists_path = (
@@ -149,3 +152,42 @@ class TestRepositoryMirror(IsolatedAsyncioTestCase):
 
             self.assertFalse(result)
             self.assertEqual(before, self._snapshot_tree(dists_path))
+
+    async def test_release_gpg_retry(self):
+        with TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+
+            config = self._get_config(root)
+            repository = config.repositories[self.REPOSITORY_URL]
+            mirror = await self._create_mirror(repository, config)
+            inrelease_path = (
+                config.skel_path
+                / repository.get_mirror_path(config.encode_tilde)
+                / "dists/test/InRelease"
+            )
+
+            with (
+                patch.object(
+                    RepositoryMirror,
+                    "RELEASE_FILES_RETRY_TIMEOUT",
+                    0,
+                ),
+                patch.object(
+                    repository,
+                    "validate_release_files",
+                    side_effect=[
+                        InvalidSignatureError(
+                            "Unable to verify release file signature"
+                        ),
+                        None,
+                    ],
+                ) as validate_release_files,
+            ):
+                release_files = await mirror.download_release_files()
+
+            self.assertTrue(release_files)
+            self.assertEqual(validate_release_files.call_count, 2)
+            self.assertEqual(
+                inrelease_path.read_bytes(),
+                b"release downloaded during recheck\n",
+            )
