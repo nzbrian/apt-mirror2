@@ -22,9 +22,9 @@ class HTTPDownloader(Downloader):
             base_url += "/"
 
         http_limits = httpx.Limits(
-            max_connections=256,
-            max_keepalive_connections=32,
-            keepalive_expiry=5,
+            max_connections=16,
+            max_keepalive_connections=4,
+            keepalive_expiry=1,
         )
 
         client_certificate = None
@@ -68,6 +68,7 @@ class HTTPDownloader(Downloader):
             follow_redirects=True,
             mounts=proxy_mounts,
             max_redirects=5,
+            limits=http_limits,
             headers={
                 "Accept-Encoding": "identity",
                 "Cache-Control": "no-cache",
